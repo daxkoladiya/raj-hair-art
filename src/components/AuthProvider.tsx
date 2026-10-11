@@ -34,13 +34,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUserProfile = async (authUser: any) => {
     if (!authUser) return null;
     try {
-      const email = authUser.email;
-      if (email) {
-        const res = await fetch(`/api/profiles?email=${encodeURIComponent(email)}`);
-        const data = await res.json();
-        if (data.success && data.profile) {
-          return { ...authUser, profile: data.profile };
-        }
+      const queryParam = authUser.id ? `id=${encodeURIComponent(authUser.id)}` : `email=${encodeURIComponent(authUser.email)}`;
+      const res = await fetch(`/api/profiles?${queryParam}`);
+      const data = await res.json();
+      if (data.success && data.profile) {
+        return {
+          ...authUser,
+          phone: data.profile.phone || authUser.phone,
+          profile: data.profile,
+          user_metadata: {
+            ...authUser.user_metadata,
+            phone: data.profile.phone || authUser.user_metadata?.phone,
+          },
+        };
       }
     } catch (e) {}
     return authUser;

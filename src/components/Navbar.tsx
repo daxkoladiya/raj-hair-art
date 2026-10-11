@@ -31,26 +31,36 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Check if phone number is present for user; if not prompt onboarding
+  // Check if phone number is present for user in Supabase; if missing prompt onboarding
   useEffect(() => {
     if (user) {
-      const phone = user.profile?.phone || user.phone;
-      if (phone) {
-        localStorage.setItem('raj_user_phone', phone);
-        if (onLoginPhoneSuccess) onLoginPhoneSuccess(phone);
-      } else if (user.email) {
-        fetch(`/api/profiles?email=${encodeURIComponent(user.email)}`)
+      const existingPhone = user.profile?.phone || user.phone || user.user_metadata?.phone;
+      if (existingPhone && existingPhone.trim()) {
+        const clean = existingPhone.trim().replace(/\D/g, '').slice(-10);
+        localStorage.setItem('raj_user_phone', clean);
+        if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
+        setShowPhoneModal(false);
+      } else {
+        // Query Supabase profiles API by user ID (or email fallback)
+        const queryParam = user.id ? `id=${encodeURIComponent(user.id)}` : `email=${encodeURIComponent(user.email)}`;
+        fetch(`/api/profiles?${queryParam}`)
           .then(r => r.json())
           .then(d => {
-            if (d.success && d.profile?.phone) {
-              localStorage.setItem('raj_user_phone', d.profile.phone);
-              if (onLoginPhoneSuccess) onLoginPhoneSuccess(d.profile.phone);
+            if (d.success && d.profile?.phone && d.profile.phone.trim()) {
+              const clean = d.profile.phone.trim().replace(/\D/g, '').slice(-10);
+              localStorage.setItem('raj_user_phone', clean);
+              if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
+              setShowPhoneModal(false);
             } else {
               setShowPhoneModal(true);
             }
           })
-          .catch(() => setShowPhoneModal(true));
+          .catch(() => {
+            setShowPhoneModal(true);
+          });
       }
+    } else {
+      setShowPhoneModal(false);
     }
   }, [user]);
 

@@ -37,11 +37,12 @@ export default function PhoneOnboardingModal({
     setLoading(true);
     try {
       const updatedProfile = {
+        id: user.id || null,
+        user_id: user.id || null,
         full_name: user.full_name || 'Patron',
         phone: cleanPhone,
         email: user.email || null,
         avatar_url: user.avatar_url || null,
-        user_id: user.id || null,
       };
 
       const res = await fetch('/api/profiles', {
@@ -54,14 +55,6 @@ export default function PhoneOnboardingModal({
       if (!data.success) {
         throw new Error(data.error || 'Failed to save phone number');
       }
-
-      // Also attempt Supabase update directly if user is logged in
-      try {
-        await supabase
-          .from('profiles')
-          .upsert({ ...updatedProfile, id: user.id })
-          .select();
-      } catch (e) {}
 
       localStorage.setItem('atelier_user', JSON.stringify(data.profile));
       localStorage.setItem('raj_user_phone', cleanPhone);

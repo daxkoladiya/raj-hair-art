@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase } from '@/lib/supabase';
-import { getStoredAppointments, saveStoredAppointments, getStoredBarbers } from '@/lib/storage';
+import {
+  getStoredAppointmentsAsync,
+  saveStoredAppointmentsAsync,
+  getStoredBarbersAsync,
+} from '@/lib/storage';
 import { Appointment } from '@/types';
 
 // Helper to normalize phone numbers (strip spaces, dashes, +91 etc. for 100% accurate matching)
@@ -48,59 +52,36 @@ export async function GET(request: Request) {
     const phone = searchParams.get('phone');
     const customerId = searchParams.get('customer_id');
 
-    // 1. Try Supabase first
-    const supabase = getAdminSupabase();
-    let supabaseAppointments: Appointment[] | null = null;
+    // Fetch all global appointments from cloud-backed Supabase storage & database
+    let appointments: Appointment[] = await getStoredAppointmentsAsync();
+    const barbers = await getStoredBarbersAsync();
 
-    try {
-      let query = supabase
-        .from('appointments')
-        .select('*, barbers(name, photo_url, phone, experience_years)')
-        .order('booking_date', { ascending: false })
-        .order('time_slot', { ascending: true });
+    // Map barber details onto appointments
+    appointments = appointments.map(apt => ({
+      ...apt,
+      barbers: apt.barbers || barbers.find(b => b.id === apt.barber_id)
+    }));
 
-      if (date) query = query.eq('booking_date', date);
-      if (barberId && barberId !== 'all') query = query.eq('barber_id', barberId);
-      if (customerId) query = query.eq('customer_id', customerId);
-
-      const { data, error } = await query;
-      if (!error && data) {
-        supabaseAppointments = data;
-      }
-    } catch (e) {
-      console.warn('Supabase query failed, switching to local store.');
+    // Filter by date (e.g. for calendar slots)
+    if (date) {
+      appointments = appointments.filter(a => a.booking_date === date);
     }
 
-    // 2. Load from dual store (Supabase or local JSON storage)
-    let appointments: Appointment[] = [];
+    // Filter by barber
+    if (barberId && barberId !== 'all') {
+      appointments = appointments.filter(a => a.barber_id === barberId);
+    }
 
-    if (supabaseAppointments && supabaseAppointments.length > 0) {
-      appointments = supabaseAppointments;
-    } else {
-      const stored = getStoredAppointments();
-      const barbers = getStoredBarbers();
-
-      appointments = stored.map(apt => ({
-        ...apt,
-        barbers: barbers.find(b => b.id === apt.barber_id)
-      }));
-
-      if (date) {
-        appointments = appointments.filter(a => a.booking_date === date);
-      }
-      if (barberId && barberId !== 'all') {
-        appointments = appointments.filter(a => a.barber_id === barberId);
-      }
-      if (customerId) {
-        appointments = appointments.filter(a => a.customer_id === customerId);
-      }
+    // Filter by customer id
+    if (customerId) {
+      appointments = appointments.filter(a => a.customer_id === customerId);
     }
 
     // Filter by normalized phone for Patron Reservations view
     if (phone && phone.trim()) {
       const targetClean = normalizePhone(phone.trim());
       appointments = appointments.filter((apt: any) => {
-        const aptClean = normalizePhone(apt.customer_phone);
+        const aptClean = normalizePhone(apt.customer_phone || '');
         return (
           apt.customer_phone?.trim() === phone.trim() ||
           (targetClean.length >= 7 && (aptClean === targetClean || aptClean.endsWith(targetClean) || targetClean.endsWith(aptClean)))
@@ -108,8 +89,28 @@ export async function GET(request: Request) {
       });
     }
 
+    // Security & Privacy: If public slot check (no authenticated phone/customerId passed),
+    // sanitize customer personal details while returning exact status & booked time slots.
+    if (!phone && !customerId) {
+      appointments = appointments.map(a => ({
+        id: a.id,
+        barber_id: a.barber_id,
+        booking_date: a.booking_date,
+        time_slot: a.time_slot,
+        service_names: a.service_names,
+        total_amount: a.total_amount,
+        status: a.status,
+        customer_name: 'Reserved Patron',
+        customer_phone: '******',
+        customer_email: null,
+        created_at: a.created_at,
+        barbers: a.barbers,
+      }));
+    }
+
     return NextResponse.json({ success: true, appointments });
   } catch (err: any) {
+    console.error('Fetch appointments error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -139,42 +140,22 @@ export async function POST(request: Request) {
     const cleanPhone = String(customer_phone).trim().replace(/\s+/g, '');
     const cleanName = String(customer_name).trim();
 
-    // 1. Check slot conflict in Supabase first, then local storage
-    let isConflict = false;
-    const supabase = getAdminSupabase();
+    // 1. Fetch current global appointments from Supabase storage
+    const allStored = await getStoredAppointmentsAsync();
 
-    try {
-      let supaQuery = supabase
-        .from('appointments')
-        .select('id')
-        .eq('booking_date', booking_date)
-        .eq('time_slot', time_slot)
-        .neq('status', 'cancelled');
-
-      if (barber_id) {
-        supaQuery = supaQuery.eq('barber_id', barber_id);
-      }
-
-      const { data: conflictData, error: conflictErr } = await supaQuery;
-      if (!conflictErr && conflictData && conflictData.length > 0) {
-        isConflict = true;
-      }
-    } catch (e) {}
-
-    if (!isConflict) {
-      const allStored = getStoredAppointments();
-      isConflict = allStored.some(
-        a =>
-          a.booking_date === booking_date &&
-          a.time_slot === time_slot &&
-          (barber_id ? a.barber_id === barber_id : true) &&
-          a.status !== 'cancelled'
-      );
-    }
+    // 2. Strict Slot Conflict Check:
+    // If ANY non-cancelled appointment exists for this date, time slot, and barber, reject booking.
+    const isConflict = allStored.some(
+      a =>
+        a.booking_date === booking_date &&
+        a.time_slot === time_slot &&
+        (barber_id ? a.barber_id === barber_id : true) &&
+        a.status !== 'cancelled'
+    );
 
     if (isConflict) {
       return NextResponse.json(
-        { success: false, error: 'This time slot is already reserved. Please choose another time slot.' },
+        { success: false, error: 'This time slot was just booked by another patron. Please select an available slot.' },
         { status: 409 }
       );
     }
@@ -194,7 +175,8 @@ export async function POST(request: Request) {
       created_at: new Date().toISOString(),
     };
 
-    // 2. Commit to Supabase first
+    // 3. Try committing to Supabase appointments table
+    const supabase = getAdminSupabase();
     try {
       const { data: supaData, error: supaErr } = await supabase
         .from('appointments')
@@ -216,22 +198,17 @@ export async function POST(request: Request) {
         newAppointment.id = supaData[0].id;
         newAppointment.barbers = supaData[0].barbers;
       }
-    } catch (e) {
-      console.warn('Supabase mirror skipped:', e);
-    }
-
-    // 3. Save to safe storage fallback (in-memory or /tmp on Vercel)
-    try {
-      const allStored = getStoredAppointments();
-      const updated = [newAppointment, ...allStored.filter(a => a.id !== newAppointment.id)];
-      saveStoredAppointments(updated);
     } catch (e) {}
 
-    // Attach barber metadata for instant UI display
-    const barbers = getStoredBarbers();
+    // 4. Save to Cloud-backed Supabase Storage (guarantees global sync across all patrons & devices)
+    const updated = [newAppointment, ...allStored.filter(a => a.id !== newAppointment.id)];
+    await saveStoredAppointmentsAsync(updated);
+
+    // 5. Attach barber metadata for UI display
+    const barbers = await getStoredBarbersAsync();
     newAppointment.barbers = barbers.find(b => b.id === barber_id);
 
-    // Trigger Telegram notification
+    // 6. Trigger Telegram notification
     if (newAppointment.barbers && newAppointment.barbers.telegram_chat_id) {
       sendTelegramAlert(newAppointment.barbers.telegram_chat_id, newAppointment).catch(console.error);
     }
@@ -256,7 +233,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ success: false, error: 'Appointment id and status required' }, { status: 400 });
     }
 
-    const allStored = getStoredAppointments();
+    const allStored = await getStoredAppointmentsAsync();
     let updatedAppt: Appointment | null = null;
 
     const modified = allStored.map(apt => {
@@ -267,9 +244,9 @@ export async function PATCH(request: Request) {
       return apt;
     });
 
-    saveStoredAppointments(modified);
+    await saveStoredAppointmentsAsync(modified);
 
-    // Also update Supabase
+    // Also update Supabase table if accessible
     try {
       const supabase = getAdminSupabase();
       await supabase.from('appointments').update({ status }).eq('id', id);

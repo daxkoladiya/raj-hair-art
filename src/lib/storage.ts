@@ -1,6 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import { getAdminSupabase } from './supabase';
 import { Appointment, Barber, Service, DEFAULT_SERVICES, DEFAULT_BARBERS } from '@/types';
 
 export interface UserProfile {
@@ -13,121 +11,156 @@ export interface UserProfile {
   created_at?: string;
 }
 
-// In serverless environments like Vercel, the project root is read-only (/var/task).
-// We use os.tmpdir() (/tmp) which is always writable, or fallback to in-memory state.
-const isServerless = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-const DATA_DIR = isServerless
-  ? path.join(os.tmpdir(), 'raj_barber_data')
-  : path.join(process.cwd(), '.data');
+const BUCKET_NAME = 'atelier_db';
 
-const APPOINTMENTS_FILE = path.join(DATA_DIR, 'appointments.json');
-const BARBERS_FILE = path.join(DATA_DIR, 'barbers.json');
-const SERVICES_FILE = path.join(DATA_DIR, 'services.json');
-const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
-
-// In-memory runtime fallbacks if filesystem is unavailable or restricted
-let memoryAppointments: Appointment[] = [];
-let memoryBarbers: Barber[] = [...DEFAULT_BARBERS];
-let memoryServices: Service[] = [...DEFAULT_SERVICES];
-let memoryProfiles: UserProfile[] = [];
-
-function ensureDataDir() {
+// Ensure Supabase Storage bucket exists
+let bucketChecked = false;
+async function ensureBucket() {
+  if (bucketChecked) return;
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    const supabase = getAdminSupabase();
+    const { data: buckets } = await supabase.storage.listBuckets();
+    if (!buckets?.some(b => b.name === BUCKET_NAME)) {
+      await supabase.storage.createBucket(BUCKET_NAME, { public: false });
     }
-    if (!fs.existsSync(APPOINTMENTS_FILE)) {
-      fs.writeFileSync(APPOINTMENTS_FILE, JSON.stringify([], null, 2));
-    }
-    if (!fs.existsSync(BARBERS_FILE)) {
-      fs.writeFileSync(BARBERS_FILE, JSON.stringify(DEFAULT_BARBERS, null, 2));
-    }
-    if (!fs.existsSync(SERVICES_FILE)) {
-      fs.writeFileSync(SERVICES_FILE, JSON.stringify(DEFAULT_SERVICES, null, 2));
-    }
-    if (!fs.existsSync(PROFILES_FILE)) {
-      fs.writeFileSync(PROFILES_FILE, JSON.stringify([], null, 2));
-    }
+    bucketChecked = true;
   } catch (err) {
-    // If filesystem write fails (e.g. read-only env), operate purely in memory
-    // console.warn('Local filesystem write restricted, using in-memory state:', err);
+    // console.warn('Bucket check error:', err);
   }
 }
 
-// Storage Helpers
+// Download JSON object from Supabase Storage
+async function downloadJson<T>(filename: string, defaultValue: T): Promise<T> {
+  await ensureBucket();
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.storage.from(BUCKET_NAME).download(filename);
+    if (!error && data) {
+      const text = await data.text();
+      return JSON.parse(text) as T;
+    }
+  } catch (err) {
+    // console.warn(`Error downloading ${filename}:`, err);
+  }
+  return defaultValue;
+}
+
+// Upload JSON object to Supabase Storage
+async function uploadJson<T>(filename: string, value: T): Promise<boolean> {
+  await ensureBucket();
+  try {
+    const supabase = getAdminSupabase();
+    const content = JSON.stringify(value, null, 2);
+    const { error } = await supabase.storage.from(BUCKET_NAME).upload(filename, content, {
+      upsert: true,
+      contentType: 'application/json',
+    });
+    return !error;
+  } catch (err) {
+    console.error(`Error uploading ${filename}:`, err);
+    return false;
+  }
+}
+
+// ==========================================
+// APPOINTMENTS
+// ==========================================
+export async function getStoredAppointmentsAsync(): Promise<Appointment[]> {
+  // 1. Try Supabase Table first
+  try {
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*, barbers(name, photo_url, phone, experience_years)')
+      .order('booking_date', { ascending: false });
+    if (!error && data && data.length > 0) {
+      return data as Appointment[];
+    }
+  } catch (e) {}
+
+  // 2. Fallback to Supabase Cloud Storage (Global across all accounts & instances)
+  return await downloadJson<Appointment[]>('appointments.json', []);
+}
+
+export async function saveStoredAppointmentsAsync(appts: Appointment[]): Promise<void> {
+  // Always persist into Supabase Cloud Storage
+  await uploadJson('appointments.json', appts);
+}
+
+// Synchronous fallbacks for backwards compatibility if needed
 export function getStoredAppointments(): Appointment[] {
-  ensureDataDir();
+  return [];
+}
+export function saveStoredAppointments(_appts: Appointment[]): void {}
+
+// ==========================================
+// PROFILES
+// ==========================================
+export async function getStoredProfilesAsync(): Promise<UserProfile[]> {
+  // 1. Check Supabase profiles table
   try {
-    if (fs.existsSync(APPOINTMENTS_FILE)) {
-      const raw = fs.readFileSync(APPOINTMENTS_FILE, 'utf-8');
-      return JSON.parse(raw);
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.from('profiles').select('*');
+    if (!error && data && data.length > 0) {
+      return data as UserProfile[];
     }
-  } catch (err) {}
-  return memoryAppointments;
+  } catch (e) {}
+
+  // 2. Fallback to Supabase Cloud Storage
+  return await downloadJson<UserProfile[]>('profiles.json', []);
 }
 
-export function saveStoredAppointments(appts: Appointment[]) {
-  memoryAppointments = appts;
-  ensureDataDir();
-  try {
-    fs.writeFileSync(APPOINTMENTS_FILE, JSON.stringify(appts, null, 2));
-  } catch (err) {}
-}
-
-export function getStoredBarbers(): Barber[] {
-  ensureDataDir();
-  try {
-    if (fs.existsSync(BARBERS_FILE)) {
-      const raw = fs.readFileSync(BARBERS_FILE, 'utf-8');
-      return JSON.parse(raw);
-    }
-  } catch (err) {}
-  return memoryBarbers;
-}
-
-export function saveStoredBarbers(barbers: Barber[]) {
-  memoryBarbers = barbers;
-  ensureDataDir();
-  try {
-    fs.writeFileSync(BARBERS_FILE, JSON.stringify(barbers, null, 2));
-  } catch (err) {}
-}
-
-export function getStoredServices(): Service[] {
-  ensureDataDir();
-  try {
-    if (fs.existsSync(SERVICES_FILE)) {
-      const raw = fs.readFileSync(SERVICES_FILE, 'utf-8');
-      return JSON.parse(raw);
-    }
-  } catch (err) {}
-  return memoryServices;
-}
-
-export function saveStoredServices(services: Service[]) {
-  memoryServices = services;
-  ensureDataDir();
-  try {
-    fs.writeFileSync(SERVICES_FILE, JSON.stringify(services, null, 2));
-  } catch (err) {}
+export async function saveStoredProfilesAsync(profiles: UserProfile[]): Promise<void> {
+  await uploadJson('profiles.json', profiles);
 }
 
 export function getStoredProfiles(): UserProfile[] {
-  ensureDataDir();
+  return [];
+}
+export function saveStoredProfiles(_profiles: UserProfile[]): void {}
+
+// ==========================================
+// BARBERS
+// ==========================================
+export async function getStoredBarbersAsync(): Promise<Barber[]> {
   try {
-    if (fs.existsSync(PROFILES_FILE)) {
-      const raw = fs.readFileSync(PROFILES_FILE, 'utf-8');
-      return JSON.parse(raw);
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.from('barbers').select('*');
+    if (!error && data && data.length > 0) {
+      return data as Barber[];
     }
-  } catch (err) {}
-  return memoryProfiles;
+  } catch (e) {}
+  return await downloadJson<Barber[]>('barbers.json', DEFAULT_BARBERS);
 }
 
-export function saveStoredProfiles(profiles: UserProfile[]) {
-  memoryProfiles = profiles;
-  ensureDataDir();
+export async function saveStoredBarbersAsync(barbers: Barber[]): Promise<void> {
+  await uploadJson('barbers.json', barbers);
+}
+
+export function getStoredBarbers(): Barber[] {
+  return DEFAULT_BARBERS;
+}
+export function saveStoredBarbers(_barbers: Barber[]): void {}
+
+// ==========================================
+// SERVICES
+// ==========================================
+export async function getStoredServicesAsync(): Promise<Service[]> {
   try {
-    fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2));
-  } catch (err) {}
+    const supabase = getAdminSupabase();
+    const { data, error } = await supabase.from('services').select('*');
+    if (!error && data && data.length > 0) {
+      return data as Service[];
+    }
+  } catch (e) {}
+  return await downloadJson<Service[]>('services.json', DEFAULT_SERVICES);
 }
 
+export async function saveStoredServicesAsync(services: Service[]): Promise<void> {
+  await uploadJson('services.json', services);
+}
+
+export function getStoredServices(): Service[] {
+  return DEFAULT_SERVICES;
+}
+export function saveStoredServices(_services: Service[]): void {}
