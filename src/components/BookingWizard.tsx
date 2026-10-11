@@ -95,11 +95,11 @@ export default function BookingWizard({
     setIsLoadingSlots(true);
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      let url = `/api/appointments?date=${dateStr}`;
+      let url = `/api/appointments?date=${dateStr}&_t=${Date.now()}`;
       if (selectedBarberId) {
         url += `&barber_id=${selectedBarberId}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       const json = await res.json();
       if (json.success && Array.isArray(json.appointments)) {
         const booked = json.appointments
@@ -509,17 +509,17 @@ export default function BookingWizard({
                       onClick={() => setSelectedTimeSlot(slot)}
                       className={`py-2.5 px-2 rounded-xl text-xs font-mono text-center transition-all flex items-center justify-center gap-1.5 ${
                         isBooked
-                          ? 'opacity-40 cursor-not-allowed bg-zinc-800 text-zinc-500 line-through border border-white/5 pointer-events-none'
+                          ? 'bg-rose-950/30 text-rose-400/80 border border-rose-900/40 cursor-not-allowed pointer-events-none'
                           : isSelected
                           ? 'bg-[#C8102E] text-white font-bold border border-[#C8102E] shadow-md shadow-[#C8102E]/30 cursor-pointer'
                           : 'glass-card hover:border-[#C8102E]/50 cursor-pointer'
                       }`}
                     >
                       {isBooked ? (
-                        <>
-                          <Lock className="w-3 h-3 text-red-500" />
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-rose-400">
+                          <Lock className="w-3 h-3 text-rose-500 shrink-0" />
                           <span>ALREADY BOOKED</span>
-                        </>
+                        </div>
                       ) : (
                         <span>{slot}</span>
                       )}
