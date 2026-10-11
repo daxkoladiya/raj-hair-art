@@ -31,29 +31,36 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Check if phone number is present in user state or Supabase; ONLY show modal if loaded and phone is truly empty
+  // Check if phone number is present in user state or Supabase; ONLY show modal once for new users on first-time login
   useEffect(() => {
-    // If auth/profile is still resolving, DO NOT show phone modal
-    if (loading || !isProfileLoaded) {
+    // 1. If auth/profile is still resolving or not logged in, DO NOT show modal
+    if (loading || !isProfileLoaded || !user) {
       setShowPhoneModal(false);
       return;
     }
 
-    if (!user) {
+    const userId = user.id || user.email || 'patron';
+    const dismissedKey = `raj_phone_prompted_${userId}`;
+
+    // 2. If the user already completed or was already prompted in this browser, never pop up again automatically
+    if (typeof window !== 'undefined' && localStorage.getItem(dismissedKey)) {
       setShowPhoneModal(false);
       return;
     }
 
-    const existingPhone = user.profile?.phone || user.phone || user.user_metadata?.phone;
+    // 3. If phone is already known in user state or cached in localStorage
+    const cachedPhone = typeof window !== 'undefined' ? localStorage.getItem('raj_user_phone') : null;
+    const existingPhone = user.profile?.phone || user.phone || user.user_metadata?.phone || cachedPhone;
     if (existingPhone && String(existingPhone).trim()) {
       const clean = String(existingPhone).trim().replace(/\D/g, '').slice(-10);
       localStorage.setItem('raj_user_phone', clean);
+      localStorage.setItem(dismissedKey, 'true');
       if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
       setShowPhoneModal(false);
       return;
     }
 
-    // Direct Supabase query to verify if phone exists before ever opening modal
+    // 4. Query Supabase profiles to verify if this user already has a phone saved
     const checkSupabaseProfile = async () => {
       try {
         const { supabase } = await import('@/lib/supabaseClient');
@@ -61,11 +68,12 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
           .from('profiles')
           .select('phone')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
         if (!error && data?.phone && String(data.phone).trim()) {
           const clean = String(data.phone).trim().replace(/\D/g, '').slice(-10);
           localStorage.setItem('raj_user_phone', clean);
+          localStorage.setItem(dismissedKey, 'true');
           updateAuthUser({ phone: clean });
           if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
           setShowPhoneModal(false);
@@ -79,15 +87,19 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
         if (d.success && d.profile?.phone && String(d.profile.phone).trim()) {
           const clean = String(d.profile.phone).trim().replace(/\D/g, '').slice(-10);
           localStorage.setItem('raj_user_phone', clean);
+          localStorage.setItem(dismissedKey, 'true');
           updateAuthUser({ phone: clean });
           if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
           setShowPhoneModal(false);
-        } else {
-          // Phone is genuinely absent in Supabase
-          setShowPhoneModal(true);
+          return;
         }
+
+        // 5. New user on first login without phone: show onboarding modal once and mark prompted
+        localStorage.setItem(dismissedKey, 'true');
+        setShowPhoneModal(true);
       } catch (err) {
         console.error('Profile check error:', err);
+        setShowPhoneModal(false);
       }
     };
 
@@ -127,6 +139,10 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
 
   const handlePhoneOnboardingSuccess = async (updatedProfile: any) => {
     setShowPhoneModal(false);
+    if (user) {
+      const userId = user.id || user.email || 'patron';
+      localStorage.setItem(`raj_phone_prompted_${userId}`, 'true');
+    }
     updateAuthUser(updatedProfile);
     if (onLoginPhoneSuccess && updatedProfile.phone) {
       onLoginPhoneSuccess(updatedProfile.phone);
@@ -427,7 +443,13 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
         isOpen={showPhoneModal}
         user={user ? { ...user, full_name: displayName } : null}
         onSuccess={handlePhoneOnboardingSuccess}
-        onClose={() => setShowPhoneModal(false)}
+        onClose={() => {
+          setShowPhoneModal(false);
+          if (user) {
+            const userId = user.id || user.email || 'patron';
+            localStorage.setItem(`raj_phone_prompted_${userId}`, 'true');
+          }
+        }}
       />
     </>
   );
