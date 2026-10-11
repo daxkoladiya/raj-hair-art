@@ -139,15 +139,38 @@ export async function POST(request: Request) {
     const cleanPhone = String(customer_phone).trim().replace(/\s+/g, '');
     const cleanName = String(customer_name).trim();
 
-    // Check slot conflict in both Supabase and Local Storage
-    const allStored = getStoredAppointments();
-    const isConflict = allStored.some(
-      a =>
-        a.booking_date === booking_date &&
-        a.time_slot === time_slot &&
-        (barber_id ? a.barber_id === barber_id : true) &&
-        a.status !== 'cancelled'
-    );
+    // 1. Check slot conflict in Supabase first, then local storage
+    let isConflict = false;
+    const supabase = getAdminSupabase();
+
+    try {
+      let supaQuery = supabase
+        .from('appointments')
+        .select('id')
+        .eq('booking_date', booking_date)
+        .eq('time_slot', time_slot)
+        .neq('status', 'cancelled');
+
+      if (barber_id) {
+        supaQuery = supaQuery.eq('barber_id', barber_id);
+      }
+
+      const { data: conflictData, error: conflictErr } = await supaQuery;
+      if (!conflictErr && conflictData && conflictData.length > 0) {
+        isConflict = true;
+      }
+    } catch (e) {}
+
+    if (!isConflict) {
+      const allStored = getStoredAppointments();
+      isConflict = allStored.some(
+        a =>
+          a.booking_date === booking_date &&
+          a.time_slot === time_slot &&
+          (barber_id ? a.barber_id === barber_id : true) &&
+          a.status !== 'cancelled'
+      );
+    }
 
     if (isConflict) {
       return NextResponse.json(
@@ -171,12 +194,7 @@ export async function POST(request: Request) {
       created_at: new Date().toISOString(),
     };
 
-    // Save to local storage first (Guaranteed 100% write & persistence)
-    const updated = [newAppointment, ...allStored];
-    saveStoredAppointments(updated);
-
-    // Attempt Supabase commit as well
-    const supabase = getAdminSupabase();
+    // 2. Commit to Supabase first
     try {
       const { data: supaData, error: supaErr } = await supabase
         .from('appointments')
@@ -201,6 +219,13 @@ export async function POST(request: Request) {
     } catch (e) {
       console.warn('Supabase mirror skipped:', e);
     }
+
+    // 3. Save to safe storage fallback (in-memory or /tmp on Vercel)
+    try {
+      const allStored = getStoredAppointments();
+      const updated = [newAppointment, ...allStored.filter(a => a.id !== newAppointment.id)];
+      saveStoredAppointments(updated);
+    } catch (e) {}
 
     // Attach barber metadata for instant UI display
     const barbers = getStoredBarbers();

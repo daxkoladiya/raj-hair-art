@@ -14,9 +14,9 @@ export async function GET(request: Request) {
 
     const cleanPhone = phone ? phone.trim().replace(/\D/g, '').slice(-10) : null;
 
-    // Check Supabase first
-    const supabase = getAdminSupabase();
+    // 1. Check Supabase first
     try {
+      const supabase = getAdminSupabase();
       let query = supabase.from('profiles').select('*');
       if (cleanPhone) query = query.eq('phone', cleanPhone);
       else if (email) query = query.eq('email', email);
@@ -25,9 +25,11 @@ export async function GET(request: Request) {
       if (!error && data) {
         return NextResponse.json({ success: true, profile: data });
       }
-    } catch (e) {}
+    } catch (e) {
+      // Supabase query error, fallback to stored profiles
+    }
 
-    // Fallback to local store
+    // 2. Safe storage fallback
     const profiles = getStoredProfiles();
     const found = profiles.find(p => (cleanPhone && p.phone === cleanPhone) || (email && p.email === email));
 
@@ -61,7 +63,32 @@ export async function POST(request: Request) {
       created_at: new Date().toISOString(),
     };
 
-    // Save to local store
+    // 1. Try saving to Supabase first
+    try {
+      const supabase = getAdminSupabase();
+      const { data, error } = await supabase
+        .from('profiles')
+        .upsert([newProfile], { onConflict: 'phone' })
+        .select()
+        .single();
+
+      if (!error && data) {
+        // Also sync in-memory / local store safely
+        const profiles = getStoredProfiles();
+        const existingIdx = profiles.findIndex(p => p.phone === cleanPhone);
+        if (existingIdx >= 0) {
+          profiles[existingIdx] = { ...profiles[existingIdx], ...data };
+        } else {
+          profiles.unshift(data);
+        }
+        saveStoredProfiles(profiles);
+        return NextResponse.json({ success: true, profile: data });
+      }
+    } catch (e) {
+      // Continue to fallback
+    }
+
+    // 2. Fallback to safe local/memory storage (handles read-only Vercel environment)
     const profiles = getStoredProfiles();
     const existingIndex = profiles.findIndex(p => p.phone === cleanPhone);
 
@@ -73,20 +100,6 @@ export async function POST(request: Request) {
       profiles.unshift(newProfile);
       saveStoredProfiles(profiles);
     }
-
-    // Try saving to Supabase
-    try {
-      const supabase = getAdminSupabase();
-      const { data, error } = await supabase
-        .from('profiles')
-        .insert([newProfile])
-        .select()
-        .single();
-
-      if (!error && data) {
-        return NextResponse.json({ success: true, profile: data });
-      }
-    } catch (e) {}
 
     return NextResponse.json({ success: true, profile: newProfile });
   } catch (err: any) {
