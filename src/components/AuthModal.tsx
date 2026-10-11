@@ -29,11 +29,13 @@ export default function AuthModal({ isOpen, onClose, onSuccess, customMessage }:
     try {
       setLoading(true);
       setErrorMsg('');
-      const redirectOrigin = typeof window !== 'undefined' ? `${window.location.origin}/` : 'http://localhost:3000/';
+      const redirectUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/auth/callback`
+        : 'https://raj-hair-art.vercel.app/auth/callback';
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectOrigin,
+          redirectTo: redirectUrl,
           queryParams: {
             prompt: 'select_account',
           },
