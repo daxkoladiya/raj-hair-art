@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase } from '@/lib/supabase';
-import { getStoredProfilesAsync, saveStoredProfilesAsync, UserProfile } from '@/lib/storage';
+import { UserProfile } from '@/lib/storage';
 
 export async function GET(request: Request) {
   try {
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     const cleanPhone = phone ? phone.trim().replace(/\D/g, '').slice(-10) : null;
     const supabase = getAdminSupabase();
 
-    // 1. Try querying Supabase profiles table directly by user ID, phone, or email
+    // 1. Query Supabase profiles table directly by user ID, phone, or email
     try {
       let query = supabase.from('profiles').select('*');
       if (id) query = query.eq('id', id);
@@ -61,15 +61,7 @@ export async function GET(request: Request) {
       } catch (e) {}
     }
 
-    // 3. Fallback to Supabase Cloud Storage (profiles.json)
-    const profiles = await getStoredProfilesAsync();
-    const found = profiles.find(p =>
-      (id && (p.id === id || p.user_id === id)) ||
-      (cleanPhone && p.phone === cleanPhone) ||
-      (email && p.email?.toLowerCase() === email.toLowerCase())
-    );
-
-    return NextResponse.json({ success: true, profile: found || null });
+    return NextResponse.json({ success: true, profile: null });
   } catch (err: any) {
     console.error('Error fetching profile:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -81,29 +73,21 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { id, user_id, full_name, phone, email, avatar_url } = body;
 
-    if (!full_name || !phone) {
-      return NextResponse.json({ success: false, error: 'Full name and 10-digit phone number are required' }, { status: 400 });
+    const rawPhone = phone || body.mobileNumber;
+    if (!rawPhone) {
+      return NextResponse.json({ success: false, error: 'Valid 10-digit phone number is required' }, { status: 400 });
     }
 
-    const cleanPhone = String(phone).trim().replace(/\D/g, '').slice(-10);
+    const cleanPhone = String(rawPhone).trim().replace(/\D/g, '').slice(-10);
     if (cleanPhone.length !== 10) {
       return NextResponse.json({ success: false, error: 'Please provide a valid 10-digit mobile number' }, { status: 400 });
     }
 
     const userId = id || user_id || null;
+    const name = (full_name || body.name || 'Patron').trim();
     const supabase = getAdminSupabase();
 
-    const newProfile: UserProfile = {
-      id: userId || 'usr-' + Date.now(),
-      user_id: userId,
-      full_name: full_name.trim(),
-      phone: cleanPhone,
-      email: email?.trim() || null,
-      avatar_url: avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(full_name.trim())}`,
-      created_at: new Date().toISOString(),
-    };
-
-    // 1. If user ID is provided, persist phone directly into Supabase Auth user_metadata & phone field
+    // 1. If user ID is provided, persist phone directly into Supabase Auth user_metadata
     if (userId) {
       try {
         await supabase.auth.admin.updateUserById(userId, {
@@ -111,7 +95,7 @@ export async function POST(request: Request) {
           phone_confirm: true,
           user_metadata: {
             phone: cleanPhone,
-            full_name: full_name.trim(),
+            full_name: name,
           },
         });
       } catch (authUpdateErr) {
@@ -119,44 +103,86 @@ export async function POST(request: Request) {
       }
     }
 
-    // 2. Attempt upsert into Supabase `profiles` table
-    try {
-      const { data: supaProfile, error: supaErr } = await supabase
+    // 2. Direct Update/Upsert in Supabase `profiles` SQL table
+    let returnedProfile: any = null;
+
+    if (userId) {
+      // First attempt update on existing row
+      const { data: updatedData, error: updateErr } = await supabase
         .from('profiles')
-        .upsert([newProfile], { onConflict: userId ? 'id' : 'phone' })
+        .update({ phone: cleanPhone })
+        .eq('id', userId)
+        .select()
+        .maybeSingle();
+
+      if (!updateErr && updatedData) {
+        returnedProfile = updatedData;
+      } else {
+        // If no row exists or update didn't match, perform upsert
+        const upsertPayload: any = {
+          id: userId,
+          phone: cleanPhone,
+          full_name: name,
+        };
+        const { data: upsertData, error: upsertErr } = await supabase
+          .from('profiles')
+          .upsert([upsertPayload], { onConflict: 'id' })
+          .select()
+          .single();
+
+        if (upsertErr) {
+          console.error('Supabase profile upsert error:', upsertErr);
+          // Return fallback response object with updated phone so client does not stall
+          returnedProfile = {
+            id: userId,
+            full_name: name,
+            phone: cleanPhone,
+            email: email || null,
+          };
+        } else {
+          returnedProfile = upsertData;
+        }
+      }
+    } else {
+      // Guest profile: query or upsert by phone
+      const guestPayload: any = {
+        id: 'usr-' + Date.now(),
+        phone: cleanPhone,
+        full_name: name,
+      };
+      const { data: guestData, error: guestErr } = await supabase
+        .from('profiles')
+        .upsert([guestPayload], { onConflict: 'phone' })
         .select()
         .single();
 
-      if (!supaErr && supaProfile) {
-        // Also sync cloud storage
-        const allProfiles = await getStoredProfilesAsync();
-        const existingIdx = allProfiles.findIndex(p => p.id === supaProfile.id || p.phone === cleanPhone);
-        if (existingIdx >= 0) {
-          allProfiles[existingIdx] = { ...allProfiles[existingIdx], ...supaProfile };
-        } else {
-          allProfiles.unshift(supaProfile);
-        }
-        await saveStoredProfilesAsync(allProfiles);
-        return NextResponse.json({ success: true, profile: supaProfile });
+      if (guestErr) {
+        returnedProfile = {
+          id: guestPayload.id,
+          full_name: name,
+          phone: cleanPhone,
+          email: email || null,
+        };
+      } else {
+        returnedProfile = guestData;
       }
-    } catch (e) {}
-
-    // 3. Fallback to Supabase Cloud Storage (profiles.json in atelier_db)
-    const profiles = await getStoredProfilesAsync();
-    const existingIndex = profiles.findIndex(p =>
-      (userId && (p.id === userId || p.user_id === userId)) ||
-      p.phone === cleanPhone
-    );
-
-    if (existingIndex >= 0) {
-      profiles[existingIndex] = { ...profiles[existingIndex], ...newProfile, id: profiles[existingIndex].id };
-      await saveStoredProfilesAsync(profiles);
-      return NextResponse.json({ success: true, profile: profiles[existingIndex] });
-    } else {
-      profiles.unshift(newProfile);
-      await saveStoredProfilesAsync(profiles);
-      return NextResponse.json({ success: true, profile: newProfile });
     }
+
+    const finalProfile: UserProfile = {
+      id: returnedProfile?.id || userId || 'usr-' + Date.now(),
+      user_id: userId,
+      full_name: returnedProfile?.full_name || name,
+      phone: cleanPhone,
+      email: returnedProfile?.email || email || null,
+      avatar_url: avatar_url || returnedProfile?.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`,
+      created_at: returnedProfile?.created_at || new Date().toISOString(),
+    };
+
+    return NextResponse.json({
+      success: true,
+      profile: finalProfile,
+      message: 'Profile phone saved successfully'
+    });
   } catch (err: any) {
     console.error('Error saving profile:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

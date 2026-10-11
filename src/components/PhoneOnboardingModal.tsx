@@ -45,17 +45,25 @@ export default function PhoneOnboardingModal({
         avatar_url: user.avatar_url || null,
       };
 
-      // 1. Save directly to Supabase profiles table from client if user is authenticated
+      // 1. Save directly to Supabase profiles table if user is authenticated
       if (user.id) {
         try {
-          const { error: supaErr } = await supabase
+          const { error: updateErr } = await supabase
             .from('profiles')
-            .upsert([updatedProfile], { onConflict: 'id' });
-          if (supaErr) {
-            console.warn('Client Supabase upsert note:', supaErr);
+            .update({ phone: cleanPhone })
+            .eq('id', user.id);
+
+          if (updateErr) {
+            await supabase
+              .from('profiles')
+              .upsert([{
+                id: user.id,
+                phone: cleanPhone,
+                full_name: user.full_name || user.name || 'Patron',
+              }], { onConflict: 'id' });
           }
         } catch (clientErr) {
-          console.warn('Client Supabase call error:', clientErr);
+          console.warn('Client Supabase call note:', clientErr);
         }
       }
 

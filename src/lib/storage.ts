@@ -101,21 +101,19 @@ export function saveStoredAppointments(_appts: Appointment[]): void {}
 // PROFILES
 // ==========================================
 export async function getStoredProfilesAsync(): Promise<UserProfile[]> {
-  // 1. Check Supabase profiles table
   try {
     const supabase = getAdminSupabase();
     const { data, error } = await supabase.from('profiles').select('*');
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       return data as UserProfile[];
     }
   } catch (e) {}
-
-  // 2. Fallback to Supabase Cloud Storage
-  return await downloadJson<UserProfile[]>('profiles.json', []);
+  return [];
 }
 
-export async function saveStoredProfilesAsync(profiles: UserProfile[]): Promise<void> {
-  await uploadJson('profiles.json', profiles);
+export async function saveStoredProfilesAsync(_profiles: UserProfile[]): Promise<void> {
+  // Deprecated: All profiles are updated/upserted directly in the Supabase 'profiles' table.
+  // No JSON files or Storage buckets are used.
 }
 
 export function getStoredProfiles(): UserProfile[] {
