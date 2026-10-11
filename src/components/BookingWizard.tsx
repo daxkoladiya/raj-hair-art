@@ -196,15 +196,20 @@ export default function BookingWizard({
 
     try {
       const payload = {
+        user_id: user.id,
+        customer_id: user.id,
         customer_phone: cleanPhone,
         customer_name: cleanName,
         customer_email: customerEmail.trim() || user.email || null,
         barber_id: selectedBarberId || null,
+        barber_name: selectedBarber?.name || null,
         booking_date: format(selectedDate, 'yyyy-MM-dd'),
+        date: format(selectedDate, 'yyyy-MM-dd'),
         time_slot: selectedTimeSlot,
         service_names: selectedServices.map((s) => s.name),
+        services: selectedServices.map((s) => s.name),
         total_amount: Number(totalAmount),
-        preferences: preferences.trim() || null,
+        special_notes: preferences.trim() || '',
         status: 'confirmed'
       };
 

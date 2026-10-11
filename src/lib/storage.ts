@@ -68,25 +68,27 @@ async function uploadJson<T>(filename: string, value: T): Promise<boolean> {
 // APPOINTMENTS
 // ==========================================
 export async function getStoredAppointmentsAsync(): Promise<Appointment[]> {
-  // 1. Try Supabase Table first
   try {
     const supabase = getAdminSupabase();
     const { data, error } = await supabase
       .from('appointments')
       .select('*, barbers(name, photo_url, phone, experience_years)')
       .order('booking_date', { ascending: false });
-    if (!error && data && data.length > 0) {
+    if (!error && data) {
       return data as Appointment[];
     }
-  } catch (e) {}
-
-  // 2. Fallback to Supabase Cloud Storage (Global across all accounts & instances)
-  return await downloadJson<Appointment[]>('appointments.json', []);
+    if (error) {
+      console.warn('Supabase select appointments note:', error.message || error);
+    }
+  } catch (e) {
+    console.warn('Appointments fetch error:', e);
+  }
+  return [];
 }
 
-export async function saveStoredAppointmentsAsync(appts: Appointment[]): Promise<void> {
-  // Always persist into Supabase Cloud Storage
-  await uploadJson('appointments.json', appts);
+export async function saveStoredAppointmentsAsync(_appts: Appointment[]): Promise<void> {
+  // Deprecated: All appointments are inserted directly into the Supabase 'appointments' table.
+  // No JSON files or Storage buckets are used.
 }
 
 // Synchronous fallbacks for backwards compatibility if needed
