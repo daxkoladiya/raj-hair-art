@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     // Direct query to Supabase 'appointments' table
     let query = supabase
       .from('appointments')
-      .select('*, barbers(name, photo_url, phone, experience_years)');
+      .select('id, booking_date, time_slot, barber_id, customer_id, customer_name, customer_phone, customer_email, service_names, total_amount, created_at');
 
     if (selectedDate) {
       query = query.eq('booking_date', selectedDate);
@@ -208,7 +208,7 @@ export async function POST(request: Request) {
     const { data: insertedData, error: insertError } = await supabase
       .from('appointments')
       .insert([insertPayload])
-      .select('*, barbers(*)');
+      .select();
 
     if (insertError) {
       console.error('Supabase appointment insert error:', insertError);

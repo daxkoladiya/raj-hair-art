@@ -72,7 +72,7 @@ export async function getStoredAppointmentsAsync(): Promise<Appointment[]> {
     const supabase = getAdminSupabase();
     const { data, error } = await supabase
       .from('appointments')
-      .select('*, barbers(name, photo_url, phone, experience_years)')
+      .select('id, booking_date, time_slot, barber_id, customer_id, customer_name, customer_phone, customer_email, service_names, total_amount, created_at')
       .order('booking_date', { ascending: false });
     if (!error && data) {
       return data as Appointment[];
