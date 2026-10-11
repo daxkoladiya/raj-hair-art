@@ -1,0 +1,118 @@
+[
+  {
+    "id": "apt-1791657160170-358",
+    "customer_id": null,
+    "barber_id": "b1",
+    "booking_date": "2026-10-11",
+    "time_slot": "10:30 AM",
+    "service_names": [
+      "Classic Haircut",
+      "Haircut + Beard Combo",
+      "De-Tanning Pack"
+    ],
+    "total_amount": 670,
+    "customer_name": "dax1",
+    "customer_phone": "9898305125",
+    "customer_email": "daxkoladiya01@gmail.com",
+    "status": "confirmed",
+    "created_at": "2026-10-10T18:32:40.170Z"
+  },
+  {
+    "id": "apt-1791656376317-976",
+    "customer_id": null,
+    "barber_id": "b3",
+    "booking_date": "2026-10-11",
+    "time_slot": "11:00 AM",
+    "service_names": [
+      "Classic Haircut",
+      "Beard Trim & Shape"
+    ],
+    "total_amount": 250,
+    "customer_name": "Dax Koladiya",
+    "customer_phone": "8347578288",
+    "customer_email": "daxkoladiya14@gmail.com",
+    "status": "confirmed",
+    "created_at": "2026-10-10T18:19:36.317Z"
+  },
+  {
+    "id": "apt-1791655367305-513",
+    "customer_id": null,
+    "barber_id": "b1",
+    "booking_date": "2026-10-12",
+    "time_slot": "11:00 AM",
+    "service_names": [
+      "Classic Haircut"
+    ],
+    "total_amount": 150,
+    "customer_name": "Dax Koladiya",
+    "customer_phone": "8347578288",
+    "customer_email": "daxkoladiya14@gmail.com",
+    "status": "confirmed",
+    "created_at": "2026-10-10T18:02:47.305Z"
+  },
+  {
+    "id": "apt-1791649844343-467",
+    "customer_id": null,
+    "barber_id": "b1",
+    "booking_date": "2026-10-12",
+    "time_slot": "10:30 AM",
+    "service_names": [
+      "Beard Trim & Shape",
+      "Hair Color / Dye"
+    ],
+    "total_amount": 450,
+    "customer_name": "Dax Koladiya",
+    "customer_phone": "8347578288",
+    "customer_email": "daxkoladiya14@gmail.com",
+    "status": "cancelled",
+    "created_at": "2026-10-10T16:30:44.343Z"
+  },
+  {
+    "id": "apt-1791648870862-872",
+    "customer_id": null,
+    "barber_id": "b1",
+    "booking_date": "2026-10-10",
+    "time_slot": "12:30 PM",
+    "service_names": [
+      "Haircut + Beard Combo"
+    ],
+    "total_amount": 220,
+    "customer_name": "Dax Koladiya",
+    "customer_phone": "8347578288",
+    "customer_email": "daxkoladiya14@gmail.com",
+    "status": "cancelled",
+    "created_at": "2026-10-10T16:14:30.862Z"
+  },
+  {
+    "id": "apt-1791648806241-663",
+    "customer_id": null,
+    "barber_id": "b1",
+    "booking_date": "2026-10-13",
+    "time_slot": "11:30 AM",
+    "service_names": [
+      "Beard Trim & Shape"
+    ],
+    "total_amount": 100,
+    "customer_name": "Dax Koladiya",
+    "customer_phone": "8347578288",
+    "customer_email": "daxkoladiya14@gmail.com",
+    "status": "confirmed",
+    "created_at": "2026-10-10T16:13:26.241Z"
+  },
+  {
+    "id": "apt-1791648737441-576",
+    "customer_id": null,
+    "barber_id": "b1",
+    "booking_date": "2026-10-11",
+    "time_slot": "10:00 AM",
+    "service_names": [
+      "Classic Haircut"
+    ],
+    "total_amount": 150,
+    "customer_name": "Dax Koladiya",
+    "customer_phone": "8347578288",
+    "customer_email": "daxkoladiya14@gmail.com",
+    "status": "confirmed",
+    "created_at": "2026-10-10T16:12:17.441Z"
+  }
+]

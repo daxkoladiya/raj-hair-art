@@ -1,0 +1,38 @@
+[
+  {
+    "id": "1",
+    "name": "Classic Haircut",
+    "price": 150,
+    "duration_minutes": 30
+  },
+  {
+    "id": "2",
+    "name": "Beard Trim & Shape",
+    "price": 100,
+    "duration_minutes": 20
+  },
+  {
+    "id": "3",
+    "name": "Haircut + Beard Combo",
+    "price": 220,
+    "duration_minutes": 45
+  },
+  {
+    "id": "4",
+    "name": "De-Tanning Pack",
+    "price": 300,
+    "duration_minutes": 30
+  },
+  {
+    "id": "5",
+    "name": "Hair Color / Dye",
+    "price": 350,
+    "duration_minutes": 40
+  },
+  {
+    "id": "6",
+    "name": "Head Massage",
+    "price": 120,
+    "duration_minutes": 20
+  }
+]
