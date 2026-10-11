@@ -144,6 +144,7 @@ export default function BookingWizard({
       setCurrentStep(2);
     } else if (currentStep === 2) {
       setCurrentStep(3);
+      fetchBookedSlots();
     } else if (currentStep === 3) {
       if (!selectedTimeSlot) {
         setFormError('Please select a preferred time slot.');
@@ -226,6 +227,11 @@ export default function BookingWizard({
       setBookingSuccessData(data.appointment);
       triggerConfetti();
 
+      // Immediately lock slot in local component state as well
+      if (data.appointment.time_slot) {
+        setBookedSlots((prev) => [...prev, data.appointment.time_slot]);
+      }
+
       // 3. Clear selected services immediately
       onClearSelectedServices();
 
@@ -250,6 +256,8 @@ export default function BookingWizard({
     if (next7Days.length > 0) {
       setSelectedDate(next7Days[0]);
     }
+    // Refresh booked slots immediately
+    fetchBookedSlots();
   };
 
   return (
