@@ -23,7 +23,7 @@ interface NavbarProps {
 }
 
 export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }: NavbarProps = {}) {
-  const { user, signOut, openAuthModal, closeAuthModal, isAuthModalOpen, authMessage, refreshUser } = useAuth();
+  const { user, loading, isProfileLoaded, signOut, openAuthModal, closeAuthModal, isAuthModalOpen, authMessage, refreshUser, updateAuthUser } = useAuth();
   const [activeTab, setActiveTab] = useState('barbers');
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [showVisitsModal, setShowVisitsModal] = useState(false);
@@ -31,38 +31,68 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Check if phone number is present for user in Supabase; if missing prompt onboarding
+  // Check if phone number is present in user state or Supabase; ONLY show modal if loaded and phone is truly empty
   useEffect(() => {
-    if (user) {
-      const existingPhone = user.profile?.phone || user.phone || user.user_metadata?.phone;
-      if (existingPhone && existingPhone.trim()) {
-        const clean = existingPhone.trim().replace(/\D/g, '').slice(-10);
-        localStorage.setItem('raj_user_phone', clean);
-        if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
-        setShowPhoneModal(false);
-      } else {
-        // Query Supabase profiles API by user ID (or email fallback)
-        const queryParam = user.id ? `id=${encodeURIComponent(user.id)}` : `email=${encodeURIComponent(user.email)}`;
-        fetch(`/api/profiles?${queryParam}`)
-          .then(r => r.json())
-          .then(d => {
-            if (d.success && d.profile?.phone && d.profile.phone.trim()) {
-              const clean = d.profile.phone.trim().replace(/\D/g, '').slice(-10);
-              localStorage.setItem('raj_user_phone', clean);
-              if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
-              setShowPhoneModal(false);
-            } else {
-              setShowPhoneModal(true);
-            }
-          })
-          .catch(() => {
-            setShowPhoneModal(true);
-          });
-      }
-    } else {
+    // If auth/profile is still resolving, DO NOT show phone modal
+    if (loading || !isProfileLoaded) {
       setShowPhoneModal(false);
+      return;
     }
-  }, [user]);
+
+    if (!user) {
+      setShowPhoneModal(false);
+      return;
+    }
+
+    const existingPhone = user.profile?.phone || user.phone || user.user_metadata?.phone;
+    if (existingPhone && String(existingPhone).trim()) {
+      const clean = String(existingPhone).trim().replace(/\D/g, '').slice(-10);
+      localStorage.setItem('raj_user_phone', clean);
+      if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
+      setShowPhoneModal(false);
+      return;
+    }
+
+    // Direct Supabase query to verify if phone exists before ever opening modal
+    const checkSupabaseProfile = async () => {
+      try {
+        const { supabase } = await import('@/lib/supabaseClient');
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('phone')
+          .eq('id', user.id)
+          .single();
+
+        if (!error && data?.phone && String(data.phone).trim()) {
+          const clean = String(data.phone).trim().replace(/\D/g, '').slice(-10);
+          localStorage.setItem('raj_user_phone', clean);
+          updateAuthUser({ phone: clean });
+          if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
+          setShowPhoneModal(false);
+          return;
+        }
+
+        // Fallback API check
+        const queryParam = user.id ? `id=${encodeURIComponent(user.id)}` : `email=${encodeURIComponent(user.email)}`;
+        const res = await fetch(`/api/profiles?${queryParam}`);
+        const d = await res.json();
+        if (d.success && d.profile?.phone && String(d.profile.phone).trim()) {
+          const clean = String(d.profile.phone).trim().replace(/\D/g, '').slice(-10);
+          localStorage.setItem('raj_user_phone', clean);
+          updateAuthUser({ phone: clean });
+          if (onLoginPhoneSuccess) onLoginPhoneSuccess(clean);
+          setShowPhoneModal(false);
+        } else {
+          // Phone is genuinely absent in Supabase
+          setShowPhoneModal(true);
+        }
+      } catch (err) {
+        console.error('Profile check error:', err);
+      }
+    };
+
+    checkSupabaseProfile();
+  }, [user, loading, isProfileLoaded]);
 
   // Automatic section detection during scroll
   useEffect(() => {
@@ -97,10 +127,11 @@ export default function LuxuryDockNavbar({ onOpenBooking, onLoginPhoneSuccess }:
 
   const handlePhoneOnboardingSuccess = async (updatedProfile: any) => {
     setShowPhoneModal(false);
-    await refreshUser();
+    updateAuthUser(updatedProfile);
     if (onLoginPhoneSuccess && updatedProfile.phone) {
       onLoginPhoneSuccess(updatedProfile.phone);
     }
+    await refreshUser();
   };
 
   const handleNavItemClick = (e: React.MouseEvent<HTMLAnchorElement>, item: typeof NAV_ITEMS[0]) => {

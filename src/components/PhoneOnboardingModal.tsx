@@ -39,12 +39,27 @@ export default function PhoneOnboardingModal({
       const updatedProfile = {
         id: user.id || null,
         user_id: user.id || null,
-        full_name: user.full_name || 'Patron',
+        full_name: user.full_name || user.name || 'Patron',
         phone: cleanPhone,
         email: user.email || null,
         avatar_url: user.avatar_url || null,
       };
 
+      // 1. Save directly to Supabase profiles table from client if user is authenticated
+      if (user.id) {
+        try {
+          const { error: supaErr } = await supabase
+            .from('profiles')
+            .upsert([updatedProfile], { onConflict: 'id' });
+          if (supaErr) {
+            console.warn('Client Supabase upsert note:', supaErr);
+          }
+        } catch (clientErr) {
+          console.warn('Client Supabase call error:', clientErr);
+        }
+      }
+
+      // 2. Also execute server API route for Auth Admin sync & storage persistence
       const res = await fetch('/api/profiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,9 +71,13 @@ export default function PhoneOnboardingModal({
         throw new Error(data.error || 'Failed to save phone number');
       }
 
-      localStorage.setItem('atelier_user', JSON.stringify(data.profile));
+      const finalizedProfile = data.profile || updatedProfile;
+      localStorage.setItem('atelier_user', JSON.stringify(finalizedProfile));
       localStorage.setItem('raj_user_phone', cleanPhone);
-      onSuccess(data.profile);
+      
+      // 3. Immediately close modal and update parent state
+      onSuccess(finalizedProfile);
+      onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to update phone number');
     } finally {
@@ -93,6 +112,17 @@ export default function PhoneOnboardingModal({
         >
           {/* iOS Sheet Handle for mobile */}
           <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-3 sm:hidden" />
+
+          {/* Close button */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
           {/* Header */}
           <div className="text-center mb-6">
             <span className="font-oleo text-base text-[#E63946]">One-Time Profile Setup</span>
@@ -135,7 +165,7 @@ export default function PhoneOnboardingModal({
               disabled={loading}
               className="w-full py-3.5 rounded-xl font-bold uppercase tracking-wider text-xs text-white bg-gradient-to-r from-[#E63946] to-[#C8102E] hover:from-[#f04856] hover:to-[#db1434] transition-all shadow-[0_4px_16px_rgba(230,57,70,0.4)] active:scale-98 cursor-pointer"
             >
-              {loading ? 'Saving Mobile Number...' : 'Save & Enter Atelier'}
+              {loading ? 'Saving Mobile Number...' : 'Save & Enter'}
             </button>
           </form>
         </motion.div>

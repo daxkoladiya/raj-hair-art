@@ -63,17 +63,17 @@ export default function BookingWizard({
   const [bookingSuccessData, setBookingSuccessData] = useState<any>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Sync contact details when user signs in
+  // Sync contact details when user signs in or profile updates
   useEffect(() => {
     if (user) {
       const meta = user.user_metadata || {};
       const name = meta.full_name || meta.name || user.profile?.full_name || user.name || '';
       const email = user.email || '';
-      const phone = user.profile?.phone || user.phone || localStorage.getItem('raj_user_phone') || '';
+      const phone = user.profile?.phone || user.phone || meta.phone || (typeof window !== 'undefined' ? localStorage.getItem('raj_user_phone') : '') || '';
 
       if (name && !customerName) setCustomerName(name);
       if (email && !customerEmail) setCustomerEmail(email);
-      if (phone && !customerPhone) setCustomerPhone(phone);
+      if (phone) setCustomerPhone(phone);
     }
   }, [user]);
 
