@@ -31,7 +31,6 @@ async function ensureBucket() {
 
 // Download JSON object from Supabase Storage
 async function downloadJson<T>(filename: string, defaultValue: T): Promise<T> {
-  await ensureBucket();
   try {
     const supabase = getAdminSupabase();
     const { data, error } = await supabase.storage.from(BUCKET_NAME).download(filename);
@@ -40,14 +39,13 @@ async function downloadJson<T>(filename: string, defaultValue: T): Promise<T> {
       return JSON.parse(text) as T;
     }
   } catch (err) {
-    // console.warn(`Error downloading ${filename}:`, err);
+    console.warn(`Error downloading ${filename}:`, err);
   }
   return defaultValue;
 }
 
 // Upload JSON object to Supabase Storage
 async function uploadJson<T>(filename: string, value: T): Promise<boolean> {
-  await ensureBucket();
   try {
     const supabase = getAdminSupabase();
     const content = JSON.stringify(value, null, 2);
@@ -55,10 +53,14 @@ async function uploadJson<T>(filename: string, value: T): Promise<boolean> {
       upsert: true,
       contentType: 'application/json',
     });
-    return !error;
-  } catch (err) {
+    if (error) {
+      console.error(`Supabase upload error for ${filename}:`, error);
+      throw new Error(`Failed to upload ${filename}: ${error.message}`);
+    }
+    return true;
+  } catch (err: any) {
     console.error(`Error uploading ${filename}:`, err);
-    return false;
+    throw err;
   }
 }
 
